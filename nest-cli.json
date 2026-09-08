@@ -1,0 +1,33 @@
+{
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "apps/transactions-service/src",
+  "monorepo": true,
+  "root": "apps/transactions-service",
+  "compilerOptions": {
+    "webpack": false,
+    "tsConfigPath": "apps/transactions-service/tsconfig.app.json",
+    "deleteOutDir": true
+  },
+  "projects": {
+    "transactions-service": {
+      "type": "application",
+      "root": "apps/transactions-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/transactions-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/transactions-service/tsconfig.app.json",
+        "deleteOutDir": true
+      }
+    },
+    "balance-sync-service": {
+      "type": "application",
+      "root": "apps/balance-sync-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/balance-sync-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/balance-sync-service/tsconfig.app.json",
+        "deleteOutDir": true
+      }
+    }
+  }
+}

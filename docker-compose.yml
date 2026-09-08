@@ -1,0 +1,135 @@
+services:
+  pg-a:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB_A:-service_a}
+      POSTGRES_USER: ${POSTGRES_USER_A:-service_a}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_A:-service_a}
+    ports:
+      - '${POSTGRES_PORT_A:-5433}:5432'
+    volumes:
+      - pg-a-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER_A:-service_a} -d ${POSTGRES_DB_A:-service_a}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - transactional-boxes
+
+  pg-b:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB_B:-service_b}
+      POSTGRES_USER: ${POSTGRES_USER_B:-service_b}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_B:-service_b}
+    ports:
+      - '${POSTGRES_PORT_B:-5434}:5432'
+    volumes:
+      - pg-b-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER_B:-service_b} -d ${POSTGRES_DB_B:-service_b}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - transactional-boxes
+
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      - '${KAFKA_PORT:-9092}:9092'
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ['CMD-SHELL', 'kafka-broker-api-versions --bootstrap-server localhost:9092']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - transactional-boxes
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    ports:
+      - '${KAFKA_UI_PORT:-8080}:8080'
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - transactional-boxes
+
+  transactions-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.transactions-service
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER_A:-service_a}:${POSTGRES_PASSWORD_A:-service_a}@pg-a:5432/${POSTGRES_DB_A:-service_a}
+      DRIZZLE_CONFIG: drizzle.config.transactions-service.ts
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_CLIENT_ID: transactions-service
+      KAFKA_TOPIC_BALANCE_UPDATES: ${KAFKA_TOPIC_BALANCE_UPDATES:-balance-updates}
+      OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-1000}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
+      BALANCE_UPDATE_MAX_ATTEMPTS: ${BALANCE_UPDATE_MAX_ATTEMPTS:-5}
+    ports:
+      - '${PORT_TRANSACTIONS_SERVICE:-3000}:3000'
+    depends_on:
+      pg-a:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transactional-boxes
+
+  balance-sync-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.balance-sync-service
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgres://${POSTGRES_USER_B:-service_b}:${POSTGRES_PASSWORD_B:-service_b}@pg-b:5432/${POSTGRES_DB_B:-service_b}
+      DRIZZLE_CONFIG: drizzle.config.balance-sync-service.ts
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_CLIENT_ID: balance-sync-service
+      KAFKA_CONSUMER_GROUP_ID: ${KAFKA_CONSUMER_GROUP_ID:-balance-sync-service-balance-updates}
+      KAFKA_TOPIC_BALANCE_UPDATES: ${KAFKA_TOPIC_BALANCE_UPDATES:-balance-updates}
+      KAFKA_TOPIC_BALANCE_UPDATES_DLQ: ${KAFKA_TOPIC_BALANCE_UPDATES_DLQ:-balance-updates.dlq}
+      BALANCE_UPDATE_MAX_ATTEMPTS: ${BALANCE_UPDATE_MAX_ATTEMPTS:-5}
+      INBOX_MAX_PROCESSING_ATTEMPTS: ${INBOX_MAX_PROCESSING_ATTEMPTS:-3}
+    ports:
+      - '${PORT_BALANCE_SYNC_SERVICE:-3001}:3001'
+    depends_on:
+      pg-b:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transactional-boxes
+
+networks:
+  transactional-boxes:
+    driver: bridge
+
+volumes:
+  pg-a-data:
+  pg-b-data:
+  kafka-data:

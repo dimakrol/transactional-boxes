@@ -1,0 +1,49 @@
+{
+  "name": "transactional-boxes",
+  "version": "0.0.1",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:transactions-service": "nest build transactions-service",
+    "build:balance-sync-service": "nest build balance-sync-service",
+    "start:transactions-service": "nest start transactions-service",
+    "start:balance-sync-service": "nest start balance-sync-service",
+    "start:transactions-service:dev": "nest start transactions-service --watch",
+    "start:balance-sync-service:dev": "nest start balance-sync-service --watch",
+    "start:transactions-service:prod": "node dist/apps/transactions-service/main.js",
+    "start:balance-sync-service:prod": "node dist/apps/balance-sync-service/main.js",
+    "db:generate": "drizzle-kit generate --config=$DRIZZLE_CONFIG",
+    "db:migrate": "drizzle-kit migrate --config=$DRIZZLE_CONFIG",
+    "db:generate:transactions-service": "DRIZZLE_CONFIG=drizzle.config.transactions-service.ts drizzle-kit generate --config=drizzle.config.transactions-service.ts",
+    "db:generate:balance-sync-service": "DRIZZLE_CONFIG=drizzle.config.balance-sync-service.ts drizzle-kit generate --config=drizzle.config.balance-sync-service.ts",
+    "test:load": "node scripts/load-test.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
+    "@nestjs/schedule": "^4.1.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "decimal.js": "^10.4.3",
+    "drizzle-orm": "^0.36.4",
+    "kafkajs": "^2.2.4",
+    "pg": "^8.13.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.9",
+    "@nestjs/schematics": "^10.2.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "ts-loader": "^9.5.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
