@@ -1,3 +1,14 @@
+x-transactions-service-env: &transactions-service-env
+  PORT: 3000
+  DATABASE_URL: postgres://${POSTGRES_USER_A:-service_a}:${POSTGRES_PASSWORD_A:-service_a}@pg-a:5432/${POSTGRES_DB_A:-service_a}
+  DRIZZLE_CONFIG: drizzle.config.transactions-service.ts
+  KAFKA_BROKERS: kafka:29092
+  KAFKA_TOPIC_BALANCE_UPDATES: ${KAFKA_TOPIC_BALANCE_UPDATES:-balance-updates}
+  OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-1000}
+  OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
+  OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-3}
+  BALANCE_UPDATE_MAX_ATTEMPTS: ${BALANCE_UPDATE_MAX_ATTEMPTS:-5}
+
 services:
   pg-a:
     image: postgres:16-alpine
@@ -81,18 +92,30 @@ services:
       context: .
       dockerfile: Dockerfile.transactions-service
     environment:
-      PORT: 3000
-      DATABASE_URL: postgres://${POSTGRES_USER_A:-service_a}:${POSTGRES_PASSWORD_A:-service_a}@pg-a:5432/${POSTGRES_DB_A:-service_a}
-      DRIZZLE_CONFIG: drizzle.config.transactions-service.ts
-      KAFKA_BROKERS: kafka:29092
+      <<: *transactions-service-env
       KAFKA_CLIENT_ID: transactions-service
-      KAFKA_TOPIC_BALANCE_UPDATES: ${KAFKA_TOPIC_BALANCE_UPDATES:-balance-updates}
-      OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-1000}
-      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
-      OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-3}
-      BALANCE_UPDATE_MAX_ATTEMPTS: ${BALANCE_UPDATE_MAX_ATTEMPTS:-5}
     ports:
       - '${PORT_TRANSACTIONS_SERVICE:-3000}:3000'
+    depends_on:
+      pg-a:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transactional-boxes
+
+  # Second instance of the same service, sharing pg-a's outbox table, to
+  # verify concurrent outbox-publisher instances safely split the work
+  # (SELECT ... FOR UPDATE SKIP LOCKED) instead of double-publishing.
+  transactions-service-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.transactions-service
+    environment:
+      <<: *transactions-service-env
+      KAFKA_CLIENT_ID: transactions-service-2
+    ports:
+      - '${PORT_TRANSACTIONS_SERVICE_2:-3002}:3000'
     depends_on:
       pg-a:
         condition: service_healthy
