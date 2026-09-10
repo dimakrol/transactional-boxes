@@ -68,6 +68,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
   private async handleMessage({ topic, partition, message }: EachMessagePayload): Promise<void> {
     const rawValue = message.value?.toString() ?? '';
+    this.logger.debug(`Received message at ${topic}[${partition}]@${message.offset}`);
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= this.maxProcessingAttempts; attempt++) {

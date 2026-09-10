@@ -50,6 +50,9 @@ export class InboxService {
 
         await applyBalanceDelta(tx, message.user_id, message.amount, this.maxBalanceUpdateAttempts);
       });
+      this.logger.log(
+        `Balance updated user_id=${message.user_id} amount=${message.amount} transaction_id=${message.transaction_id}`,
+      );
     } catch (err: unknown) {
       if (this.isUniqueViolation(err)) {
         this.logger.log(`Duplicate idempotency_id=${message.idempotency_id} (race), skipping`);

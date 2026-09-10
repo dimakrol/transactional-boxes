@@ -47,5 +47,6 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
       topic,
       messages: [{ key, value: JSON.stringify(value) }],
     });
+    this.logger.debug(`Sent message to topic=${topic} key=${key}`);
   }
 }

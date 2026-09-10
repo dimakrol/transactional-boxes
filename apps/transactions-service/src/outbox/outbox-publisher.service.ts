@@ -70,12 +70,16 @@ export class OutboxPublisherService {
       );
 
       let progressed = false;
+      let publishedCount = 0;
+      let failedCount = 0;
+      let poisonedCount = 0;
       for (let i = 0; i < results.length; i++) {
         const result = results[i];
         const record = pending[i];
         if (result.status === 'fulfilled') {
           await tx.update(outbox).set({ sentAt: new Date() }).where(eq(outbox.id, record.id));
           progressed = true;
+          publishedCount++;
         } else {
           const attempts = record.attempts + 1;
           const failed = attempts >= this.maxAttempts;
@@ -85,16 +89,22 @@ export class OutboxPublisherService {
             .where(eq(outbox.id, record.id));
           const reason = (result.reason as Error).message;
           if (failed) {
+            poisonedCount++;
             this.logger.error(
               `Outbox record ${record.id} exceeded max attempts (${this.maxAttempts}), giving up: ${reason}`,
             );
           } else {
+            failedCount++;
             this.logger.error(
               `Failed to publish outbox record ${record.id} (attempt ${attempts}/${this.maxAttempts}): ${reason}`,
             );
           }
         }
       }
+
+      this.logger.log(
+        `Batch processed: ${publishedCount} published, ${failedCount} failed, ${poisonedCount} poisoned`,
+      );
 
       return progressed;
     });

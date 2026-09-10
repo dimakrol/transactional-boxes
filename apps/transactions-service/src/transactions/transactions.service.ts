@@ -66,6 +66,7 @@ export class TransactionsService {
         return transaction;
       });
 
+      this.logger.log(`Transaction created id=${created.id} user_id=${dto.user_id} amount=${amount}`);
       return { transaction: created, wasCreated: true };
     } catch (err: unknown) {
       if (this.isUniqueViolation(err)) {

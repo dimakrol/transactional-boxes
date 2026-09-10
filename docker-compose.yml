@@ -8,6 +8,7 @@ x-transactions-service-env: &transactions-service-env
   OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
   OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-3}
   BALANCE_UPDATE_MAX_ATTEMPTS: ${BALANCE_UPDATE_MAX_ATTEMPTS:-5}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
 
 services:
   pg-a:
@@ -139,6 +140,7 @@ services:
       KAFKA_TOPIC_BALANCE_UPDATES_DLQ: ${KAFKA_TOPIC_BALANCE_UPDATES_DLQ:-balance-updates.dlq}
       BALANCE_UPDATE_MAX_ATTEMPTS: ${BALANCE_UPDATE_MAX_ATTEMPTS:-5}
       INBOX_MAX_PROCESSING_ATTEMPTS: ${INBOX_MAX_PROCESSING_ATTEMPTS:-3}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - '${PORT_BALANCE_SYNC_SERVICE:-3001}:3001'
     depends_on:
@@ -146,6 +148,40 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    networks:
+      - transactional-boxes
+
+  loki:
+    image: grafana/loki:3.7.7
+    command: -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+    networks:
+      - transactional-boxes
+
+  promtail:
+    image: grafana/promtail:3.6.11
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    volumes:
+      - ./observability/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks:
+      - transactional-boxes
+
+  grafana:
+    image: grafana/grafana:13.2.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - '${GRAFANA_PORT:-3300}:3000'
+    depends_on:
+      - loki
     networks:
       - transactional-boxes
 

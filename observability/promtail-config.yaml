@@ -1,0 +1,38 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'compose_service'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'compose_project'
+    pipeline_stages:
+      # Our services log JSON (pino/kafkajs) with a string "level" field
+      # (e.g. "info"); promote it to a real stream label so it's filterable
+      # in Grafana's Label filters, not just Loki's query-time detected_level.
+      - json:
+          expressions:
+            level: level
+      # kafkajs' own internal logger uses uppercase level names ("WARN",
+      # "ERROR") while pino uses lowercase ("info", "debug") — normalize so
+      # they don't show up as separate values in the level filter.
+      - template:
+          source: level
+          template: '{{ ToLower .Value }}'
+      - labels:
+          level:
