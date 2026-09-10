@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
-import { asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { DB, Db } from '../db/db.module';
 import { outbox } from '../db/schema';
 import { KafkaProducerService } from '../kafka/kafka-producer.service';
@@ -11,6 +11,7 @@ export class OutboxPublisherService {
   private readonly logger = new Logger(OutboxPublisherService.name);
   private readonly topic: string;
   private readonly batchSize: number;
+  private readonly maxAttempts: number;
   private isPolling = false;
 
   constructor(
@@ -20,6 +21,7 @@ export class OutboxPublisherService {
   ) {
     this.topic = this.config.getOrThrow<string>('KAFKA_TOPIC_BALANCE_UPDATES');
     this.batchSize = Number(this.config.get('OUTBOX_BATCH_SIZE') ?? 100);
+    this.maxAttempts = Number(this.config.get('OUTBOX_MAX_ATTEMPTS') ?? 3);
   }
 
   @Interval(Number(process.env.OUTBOX_POLL_INTERVAL_MS) || 1000)
@@ -29,25 +31,72 @@ export class OutboxPublisherService {
     }
     this.isPolling = true;
     try {
-      const pending = await this.db
-        .select()
-        .from(outbox)
-        .where(isNull(outbox.sentAt))
-        .orderBy(asc(outbox.createdAt))
-        .limit(this.batchSize);
-
-      for (const record of pending) {
-        const payload = record.payload as { user_id: string };
-        try {
-          await this.kafkaProducer.send(this.topic, payload.user_id, record.payload);
-          await this.db.update(outbox).set({ sentAt: new Date() }).where(eq(outbox.id, record.id));
-        } catch (err) {
-          this.logger.error(`Failed to publish outbox record ${record.id}: ${(err as Error).message}`);
-          // Leave sent_at unset — the record will be retried on the next tick.
-        }
+      // Drain the backlog: keep pulling batches back-to-back as long as we're
+      // making real progress, instead of waiting for the next timer tick.
+      let madeProgress = true;
+      while (madeProgress) {
+        madeProgress = await this.processBatch();
       }
     } finally {
       this.isPolling = false;
     }
+  }
+
+  /**
+   * Claims and processes a single batch inside one transaction.
+   * Returns true if at least one record was published, signalling that
+   * there may be more work waiting immediately.
+   */
+  private async processBatch(): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const pending = await tx
+        .select()
+        .from(outbox)
+        .where(and(isNull(outbox.sentAt), isNull(outbox.failedAt)))
+        .orderBy(asc(outbox.createdAt))
+        .limit(this.batchSize)
+        .for('update', { skipLocked: true });
+
+      if (pending.length === 0) {
+        return false;
+      }
+
+      const results = await Promise.allSettled(
+        pending.map(async (record) => {
+          const payload = record.payload as { user_id: string };
+          await this.kafkaProducer.send(this.topic, payload.user_id, record.payload);
+          return record;
+        }),
+      );
+
+      let progressed = false;
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const record = pending[i];
+        if (result.status === 'fulfilled') {
+          await tx.update(outbox).set({ sentAt: new Date() }).where(eq(outbox.id, record.id));
+          progressed = true;
+        } else {
+          const attempts = record.attempts + 1;
+          const failed = attempts >= this.maxAttempts;
+          await tx
+            .update(outbox)
+            .set({ attempts, failedAt: failed ? new Date() : null })
+            .where(eq(outbox.id, record.id));
+          const reason = (result.reason as Error).message;
+          if (failed) {
+            this.logger.error(
+              `Outbox record ${record.id} exceeded max attempts (${this.maxAttempts}), giving up: ${reason}`,
+            );
+          } else {
+            this.logger.error(
+              `Failed to publish outbox record ${record.id} (attempt ${attempts}/${this.maxAttempts}): ${reason}`,
+            );
+          }
+        }
+      }
+
+      return progressed;
+    });
   }
 }

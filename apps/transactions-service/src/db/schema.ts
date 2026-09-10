@@ -1,4 +1,6 @@
+import { sql } from 'drizzle-orm';
 import {
+  index,
   integer,
   jsonb,
   numeric,
@@ -22,9 +24,19 @@ export const transactions = pgTable('transactions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const outbox = pgTable('outbox', {
-  id: varchar('id', { length: 36 }).primaryKey(),
-  payload: jsonb('payload').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  sentAt: timestamp('sent_at', { withTimezone: true }),
-});
+export const outbox = pgTable(
+  'outbox',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    payload: jsonb('payload').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    attempts: integer('attempts').notNull().default(0),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
+  },
+  (table) => ({
+    pendingIdx: index('outbox_pending_idx')
+      .on(table.createdAt)
+      .where(sql`${table.sentAt} is null and ${table.failedAt} is null`),
+  }),
+);
